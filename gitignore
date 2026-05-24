@@ -1,0 +1,57 @@
+# ============================================================
+# .gitignore — E-Commerce Azure Pipeline
+# NEVER commit secrets, credentials, or real client data
+# ============================================================
+
+# Environment / secrets
+.env
+.env.*
+*.env
+secrets/
+credentials/
+
+# Azure credentials — never commit
+*.publishsettings
+azureauth.json
+local.settings.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Databricks
+.databricks/
+*.dbc
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Data files — no real client data
+*.csv
+*.parquet
+*.json.gz
+data/
+sample_data/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# ADF arm export — may contain real resource names, review before committing
+ARMTemplateForFactory.json
+ARMTemplateParametersForFactory.json

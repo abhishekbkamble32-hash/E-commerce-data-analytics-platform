@@ -1,0 +1,226 @@
+{
+    "name": "pl_ecommerce_master_ingestion",
+    "properties": {
+        "description": "Metadata-driven master ingestion pipeline for E-Commerce platform. Reads source config from control table and orchestrates all Copy Activities + Databricks Notebook Activities. Adding a new source = one row in control table, no new pipeline needed.",
+        "activities": [
+            {
+                "name": "LookupControlTable",
+                "type": "Lookup",
+                "description": "Read active source configurations from control table",
+                "typeProperties": {
+                    "source": {
+                        "type": "AzureSqlSource",
+                        "sqlReaderQuery": "SELECT * FROM dbo.pipeline_control WHERE is_active = 1 ORDER BY execution_order"
+                    },
+                    "dataset": {
+                        "referenceName": "ds_azure_sql_control_table",
+                        "type": "DatasetReference"
+                    },
+                    "firstRowOnly": false
+                }
+            },
+            {
+                "name": "ForEachSource",
+                "type": "ForEach",
+                "description": "Iterate over each active source from control table",
+                "dependsOn": [
+                    {
+                        "activity": "LookupControlTable",
+                        "dependencyConditions": ["Succeeded"]
+                    }
+                ],
+                "typeProperties": {
+                    "isSequential": false,
+                    "batchCount": 4,
+                    "items": {
+                        "value": "@activity('LookupControlTable').output.value",
+                        "type": "Expression"
+                    },
+                    "activities": [
+                        {
+                            "name": "CopyActivity",
+                            "type": "Copy",
+                            "description": "Copy data from source to ADLS Gen2 Bronze. Source connector determined by item().source_type parameter.",
+                            "typeProperties": {
+                                "source": {
+                                    "type": "@item().source_type",
+                                    "additionalColumns": [
+                                        {
+                                            "name": "pipeline_run_id",
+                                            "value": {
+                                                "value": "@pipeline().RunId",
+                                                "type": "Expression"
+                                            }
+                                        }
+                                    ]
+                                },
+                                "sink": {
+                                    "type": "ParquetSink",
+                                    "storeSettings": {
+                                        "type": "AzureBlobFSWriteSettings"
+                                    }
+                                },
+                                "enableStaging": false,
+                                "translator": {
+                                    "type": "TabularTranslator",
+                                    "typeConversion": true
+                                }
+                            },
+                            "inputs": [
+                                {
+                                    "referenceName": "@item().source_dataset",
+                                    "type": "DatasetReference",
+                                    "parameters": {
+                                        "watermark_column": "@item().watermark_column",
+                                        "last_watermark_value": "@item().last_watermark_value"
+                                    }
+                                }
+                            ],
+                            "outputs": [
+                                {
+                                    "referenceName": "ds_adls_bronze_parquet",
+                                    "type": "DatasetReference",
+                                    "parameters": {
+                                        "container": "bronze",
+                                        "folder_path": "@concat('ecommerce/', item().source_system, '/', formatDateTime(utcnow(), 'yyyy/MM/dd'))"
+                                    }
+                                }
+                            ]
+                        },
+                        {
+                            "name": "DatabricksBronzeAudit",
+                            "type": "DatabricksNotebook",
+                            "description": "Add audit columns and write to Bronze Delta via Databricks",
+                            "dependsOn": [
+                                {
+                                    "activity": "CopyActivity",
+                                    "dependencyConditions": ["Succeeded"]
+                                }
+                            ],
+                            "typeProperties": {
+                                "notebookPath": "/ecommerce/01_bronze_ingestion_audit",
+                                "baseParameters": {
+                                    "source_system": {
+                                        "value": "@item().source_system",
+                                        "type": "Expression"
+                                    },
+                                    "pipeline_run_id": {
+                                        "value": "@pipeline().RunId",
+                                        "type": "Expression"
+                                    }
+                                }
+                            },
+                            "linkedServiceName": {
+                                "referenceName": "ls_azure_databricks",
+                                "type": "LinkedServiceReference"
+                            }
+                        },
+                        {
+                            "name": "UpdateWatermark",
+                            "type": "SqlServerStoredProcedure",
+                            "description": "Update last_watermark_value in control table after successful copy",
+                            "dependsOn": [
+                                {
+                                    "activity": "DatabricksBronzeAudit",
+                                    "dependencyConditions": ["Succeeded"]
+                                }
+                            ],
+                            "typeProperties": {
+                                "storedProcedureName": "dbo.usp_update_watermark",
+                                "storedProcedureParameters": {
+                                    "source_system": {
+                                        "value": "@item().source_system",
+                                        "type": "String"
+                                    },
+                                    "new_watermark": {
+                                        "value": "@activity('CopyActivity').output.dataRead",
+                                        "type": "String"
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                }
+            },
+            {
+                "name": "DatabricksSilverTransform",
+                "type": "DatabricksNotebook",
+                "description": "Run Silver cleanse, enrich, SCD after all Bronze copies complete",
+                "dependsOn": [
+                    {
+                        "activity": "ForEachSource",
+                        "dependencyConditions": ["Succeeded"]
+                    }
+                ],
+                "typeProperties": {
+                    "notebookPath": "/ecommerce/02_silver_cleanse_enrich",
+                    "baseParameters": {
+                        "load_date": {
+                            "value": "@formatDateTime(utcnow(), 'yyyy-MM-dd')",
+                            "type": "Expression"
+                        }
+                    }
+                },
+                "linkedServiceName": {
+                    "referenceName": "ls_azure_databricks",
+                    "type": "LinkedServiceReference"
+                }
+            },
+            {
+                "name": "DatabricksSCDType2",
+                "type": "DatabricksNotebook",
+                "description": "SCD Type 2 MERGE on dim_customer",
+                "dependsOn": [
+                    {
+                        "activity": "DatabricksSilverTransform",
+                        "dependencyConditions": ["Succeeded"]
+                    }
+                ],
+                "typeProperties": {
+                    "notebookPath": "/ecommerce/03_silver_scd_type2_customer",
+                    "baseParameters": {
+                        "load_date": {
+                            "value": "@formatDateTime(utcnow(), 'yyyy-MM-dd')",
+                            "type": "Expression"
+                        }
+                    }
+                },
+                "linkedServiceName": {
+                    "referenceName": "ls_azure_databricks",
+                    "type": "LinkedServiceReference"
+                }
+            },
+            {
+                "name": "DatabricksGoldLoad",
+                "type": "DatabricksNotebook",
+                "description": "Build Gold star schema + KPI tables + OPTIMIZE/ZORDER",
+                "dependsOn": [
+                    {
+                        "activity": "DatabricksSCDType2",
+                        "dependencyConditions": ["Succeeded"]
+                    }
+                ],
+                "typeProperties": {
+                    "notebookPath": "/ecommerce/04_gold_star_schema_load",
+                    "baseParameters": {
+                        "load_date": {
+                            "value": "@formatDateTime(utcnow(), 'yyyy-MM-dd')",
+                            "type": "Expression"
+                        }
+                    }
+                },
+                "linkedServiceName": {
+                    "referenceName": "ls_azure_databricks",
+                    "type": "LinkedServiceReference"
+                }
+            }
+        ],
+        "parameters": {},
+        "annotations": [
+            "ecommerce",
+            "medallion",
+            "metadata-driven"
+        ],
+        "lastPublishTime": "2024-01-01T00:00:00Z"
+    }
+}

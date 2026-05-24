@@ -1,0 +1,130 @@
+{
+    "linkedServices": [
+        {
+            "name": "ls_adls_gen2",
+            "type": "AzureBlobFS",
+            "description": "ADLS Gen2 linked service — all three layers (Bronze/Silver/Gold). Credentials stored in Azure Key Vault, not hardcoded.",
+            "typeProperties": {
+                "url": "https://<storage-account-name>.dfs.core.windows.net",
+                "accountKey": {
+                    "type": "AzureKeyVaultSecret",
+                    "store": {
+                        "referenceName": "ls_azure_key_vault",
+                        "type": "LinkedServiceReference"
+                    },
+                    "secretName": "adls-account-key"
+                }
+            }
+        },
+        {
+            "name": "ls_azure_databricks",
+            "type": "AzureDatabricks",
+            "description": "Databricks linked service for Notebook Activity. Uses existing interactive cluster or job cluster as configured.",
+            "typeProperties": {
+                "domain": "https://<databricks-workspace-url>.azuredatabricks.net",
+                "accessToken": {
+                    "type": "AzureKeyVaultSecret",
+                    "store": {
+                        "referenceName": "ls_azure_key_vault",
+                        "type": "LinkedServiceReference"
+                    },
+                    "secretName": "databricks-pat-token"
+                },
+                "existingClusterId": "<cluster-id>"
+            }
+        },
+        {
+            "name": "ls_orders_rest_api",
+            "type": "RestService",
+            "description": "Order Management System REST API — watermark-based incremental load on order_updated_at",
+            "typeProperties": {
+                "url": "https://api.<client-domain>.com/v1/orders",
+                "enableServerCertificateValidation": true,
+                "authenticationType": "Anonymous",
+                "authHeaders": {
+                    "X-API-Key": {
+                        "type": "AzureKeyVaultSecret",
+                        "store": {
+                            "referenceName": "ls_azure_key_vault",
+                            "type": "LinkedServiceReference"
+                        },
+                        "secretName": "oms-api-key"
+                    }
+                }
+            }
+        },
+        {
+            "name": "ls_inventory_sftp",
+            "type": "Sftp",
+            "description": "Inventory System SFTP server — daily flat file drops",
+            "typeProperties": {
+                "host": "<sftp-host>",
+                "port": 22,
+                "skipHostKeyValidation": false,
+                "authenticationType": "Basic",
+                "userName": "<sftp-username>",
+                "password": {
+                    "type": "AzureKeyVaultSecret",
+                    "store": {
+                        "referenceName": "ls_azure_key_vault",
+                        "type": "LinkedServiceReference"
+                    },
+                    "secretName": "sftp-password"
+                }
+            }
+        },
+        {
+            "name": "ls_azure_sql_crm",
+            "type": "AzureSqlDatabase",
+            "description": "CRM Azure SQL Database — daily incremental load",
+            "typeProperties": {
+                "connectionString": {
+                    "type": "AzureKeyVaultSecret",
+                    "store": {
+                        "referenceName": "ls_azure_key_vault",
+                        "type": "LinkedServiceReference"
+                    },
+                    "secretName": "crm-sql-connection-string"
+                }
+            }
+        },
+        {
+            "name": "ls_azure_sql_product_catalogue",
+            "type": "AzureSqlDatabase",
+            "description": "Product Catalogue Azure SQL Database — weekly load",
+            "typeProperties": {
+                "connectionString": {
+                    "type": "AzureKeyVaultSecret",
+                    "store": {
+                        "referenceName": "ls_azure_key_vault",
+                        "type": "LinkedServiceReference"
+                    },
+                    "secretName": "product-cat-sql-connection-string"
+                }
+            }
+        },
+        {
+            "name": "ls_azure_key_vault",
+            "type": "AzureKeyVault",
+            "description": "Azure Key Vault — all secrets stored here. Nothing hardcoded in pipelines or notebooks.",
+            "typeProperties": {
+                "baseUrl": "https://<key-vault-name>.vault.azure.net/"
+            }
+        },
+        {
+            "name": "ls_azure_sql_control_table",
+            "type": "AzureSqlDatabase",
+            "description": "Control table database for metadata-driven pipeline",
+            "typeProperties": {
+                "connectionString": {
+                    "type": "AzureKeyVaultSecret",
+                    "store": {
+                        "referenceName": "ls_azure_key_vault",
+                        "type": "LinkedServiceReference"
+                    },
+                    "secretName": "control-db-connection-string"
+                }
+            }
+        }
+    ]
+}
